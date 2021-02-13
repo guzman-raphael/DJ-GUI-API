@@ -144,7 +144,7 @@ class DJConnector():
                 value = ('NULL' if attribute_filter['value'] is None
                          else attribute_filter['value'])
 
-            return f"{attribute_filter['attributeName']}{operation}{value}"
+            return f"`{attribute_filter['attributeName']}`{operation}{value}"
 
         DJConnector.set_datajoint_config(jwt_payload)
 
@@ -204,7 +204,7 @@ class DJConnector():
         return rows, len(query)
 
     @staticmethod
-    def get_table_attributes(jwt_payload: dict, schema_name: str, table_name: str):
+    def get_table_attributes(jwt_payload: dict, schema_name: str, table_name: str) -> dict:
         """
         Method to get primary and secondary attributes of a table
         :param jwt_payload: Dictionary containing databaseAddress, username and password
@@ -220,30 +220,24 @@ class DJConnector():
         """
         DJConnector.set_datajoint_config(jwt_payload)
 
-        schema_virtual_module = dj.create_virtual_module(schema_name, schema_name)
-
+        virtual_module = dj.create_virtual_module(schema_name, schema_name)
+        boolean_attributes = [t for (t,) in virtual_module.schema.connection.query(f"""
+        SELECT column_name FROM `information_schema`.`columns`
+        WHERE table_schema = '{schema_name}' AND table_name = '{table_name}' AND
+              column_type = 'tinyint(1)'
+        """).fetchall()]
         # Get table object from name
-        table = DJConnector.get_table_object(schema_virtual_module, table_name)
+        table = DJConnector.get_table_object(virtual_module, table_name)
 
         table_attributes = dict(primary_attributes=[], secondary_attributes=[])
         for attribute_name, attribute_info in table.heading.attributes.items():
-            if attribute_info.in_key:
-                table_attributes['primary_attributes'].append((
-                    attribute_name,
-                    attribute_info.type,
-                    attribute_info.nullable,
-                    attribute_info.default,
-                    attribute_info.autoincrement
-                    ))
-            else:
-                table_attributes['secondary_attributes'].append((
-                    attribute_name,
-                    attribute_info.type,
-                    attribute_info.nullable,
-                    attribute_info.default,
-                    attribute_info.autoincrement
-                    ))
-
+            attribute = (attribute_name, ('bool' if attribute_info.type in boolean_attributes
+                                          else attribute_info.type),
+                         attribute_info.nullable, attribute_info.default,
+                         attribute_info.autoincrement)
+            (table_attributes['primary_attributes'].append(attribute)
+             if attribute_info.in_key
+             else table_attributes['secondary_attributes'].append(attribute))
         return table_attributes
 
     @staticmethod
